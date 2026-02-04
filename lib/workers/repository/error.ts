@@ -40,7 +40,23 @@ import {
   raiseConfigWarningIssue,
   raiseCredentialsWarningIssue,
 } from './error-config.ts';
+import {
+  type RuntimeErrorContext,
+  createRuntimeError,
+} from './error-messages.ts';
 import type { RepositoryResult } from './result.ts';
+
+function addRuntimeError(
+  config: RenovateConfig,
+  result: RepositoryResult,
+  context?: RuntimeErrorContext,
+): void {
+  const error = createRuntimeError(result, context);
+  if (error) {
+    config.errors = config.errors ?? [];
+    config.errors.push(error);
+  }
+}
 
 export default async function handleError(
   config: RenovateConfig,
@@ -135,12 +151,14 @@ export default async function handleError(
       logger.warn({ error: err }, 'Repository has invalid config');
     }
     await raiseConfigWarningIssue(config, err);
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === MISSING_API_CREDENTIALS) {
     delete config.branchList;
     logger.info({ error: err }, MISSING_API_CREDENTIALS);
     await raiseCredentialsWarningIssue(config, err);
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === CONFIG_SECRETS_EXPOSED) {
@@ -149,6 +167,7 @@ export default async function handleError(
       { error: err },
       'Repository aborted due to potential secrets exposure',
     );
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err instanceof ExternalHostError) {
@@ -158,6 +177,10 @@ export default async function handleError(
     );
     logger.info('External host error causing abort - skipping');
     delete config.branchList;
+    addRuntimeError(config, EXTERNAL_HOST_ERROR, {
+      hostType: err.hostType,
+      packageName: err.packageName,
+    });
     return EXTERNAL_HOST_ERROR;
   }
   if (
@@ -166,31 +189,37 @@ export default async function handleError(
   ) {
     logger.error('Disk space error - skipping');
     delete config.branchList;
+    addRuntimeError(config, SYSTEM_INSUFFICIENT_DISK_SPACE);
     return SYSTEM_INSUFFICIENT_DISK_SPACE;
   }
   if (err.message === PLATFORM_RATE_LIMIT_EXCEEDED) {
     logger.warn('Rate limit exceeded - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === SYSTEM_INSUFFICIENT_MEMORY) {
     logger.warn('Insufficient memory - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === PLATFORM_BAD_CREDENTIALS) {
     logger.warn('Bad credentials - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === PLATFORM_INTEGRATION_UNAUTHORIZED) {
     logger.warn('Integration unauthorized - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === PLATFORM_AUTHENTICATION_ERROR) {
     logger.warn('Authentication error - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message === TEMPORARY_ERROR) {
@@ -202,11 +231,13 @@ export default async function handleError(
     delete config.branchList;
     logger.info('Lock file error - aborting');
     delete config.branchList;
+    addRuntimeError(config, err.message);
     return err.message;
   }
   if (err.message.includes('The requested URL returned error: 5')) {
     logger.warn({ err }, 'Git error - aborting');
     delete config.branchList;
+    addRuntimeError(config, EXTERNAL_HOST_ERROR);
     // rewrite this error
     return EXTERNAL_HOST_ERROR;
   }
@@ -216,6 +247,7 @@ export default async function handleError(
   ) {
     logger.warn({ err }, 'Git error - aborting');
     delete config.branchList;
+    addRuntimeError(config, EXTERNAL_HOST_ERROR);
     // rewrite this error
     return EXTERNAL_HOST_ERROR;
   }
@@ -227,6 +259,7 @@ export default async function handleError(
   logger.error({ err }, `Repository has unknown error`);
   // delete branchList to avoid cleaning up branches
   delete config.branchList;
+  addRuntimeError(config, UNKNOWN_ERROR);
 
   return UNKNOWN_ERROR;
 }
